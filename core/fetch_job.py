@@ -12,10 +12,18 @@ from parsers.demographics import estimate_demographics
 
 from collectors.youtube_collector import fetch_youtube_posts
 
+from notifications.email_sender import send_email
+from notifications.report_builder import build_email_table
+from database.repository import get_recent_posts
+from notifications.report_builder import build_combined_email_table
+from database.repository import get_recent_posts_all_platforms
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
+
+EMAIL_MODE = "combined"
+# options: "separate" or "combined"
 def find_matching_keywords(text, keywords):
 
     text = text.lower()
@@ -184,9 +192,66 @@ def run_fetch_job():
                 db.rollback()
                 log.warning(e)
 
+        emails = config.get("emails")
+
+        log.info(f"Checking email trigger for config {config['id']}")
+
+        if emails:
+
+            emails = emails if isinstance(emails, list) else json.loads(emails)
+
+            log.info(f"Emails configured: {emails}")
+
+            frequency = config.get("frequency", 60)
+
+            if EMAIL_MODE == "separate":
+
+                platforms = ["X", "YOUTUBE"]
+
+                for platform in platforms:
+
+                    posts = get_recent_posts(cur, config["id"], platform, frequency)
+
+                    log.info(f"{platform}: Found {len(posts)} posts for email report")
+
+                    if not posts:
+                        continue
+
+                    html = build_email_table(
+                        posts,
+                        f"Tamil Nadu Election Social Listening ({platform})"
+                    )
+
+                    send_email(
+                        emails,
+                        f"{platform} Monitoring Report",
+                        html
+                    )
+
+            elif EMAIL_MODE == "combined":
+
+                posts = get_recent_posts_all_platforms(
+                    cur,
+                    config["id"],
+                    frequency
+                )
+
+                log.info(f"Combined report: Found {len(posts)} posts")
+
+                if posts:
+
+                    html = build_combined_email_table(
+                        posts,
+                        "Tamil Nadu Election Social Listening"
+                    )
+
+                    send_email(
+                        emails,
+                        "Social Media Monitoring Report",
+                        html
+                    )
     cur.close()
     db.close()
 
     log.info(f"Fetched {total} posts")
 
-    
