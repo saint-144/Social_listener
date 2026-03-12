@@ -2,8 +2,6 @@ import logging
 import json
 
 from datetime import datetime, timedelta, timezone
-
-from core.config import FETCH_INTERVAL_MINUTES
 from database.connection import get_db_connection
 from database.repository import save_post
 # from collectors.x_collector import fetch_tweets
@@ -58,6 +56,17 @@ def run_fetch_job():
     total = 0
 
     for config in configs:
+        now = datetime.now()
+        last_run = config.get("last_run_at")
+        frequency = config.get("frequency") or 15
+
+        # Check if due
+        if last_run:
+            if now < last_run + timedelta(minutes=frequency):
+                log.info(f"Config {config['id']} is not due yet. Next run at {last_run + timedelta(minutes=frequency)}")
+                continue
+
+        log.info(f"Processing config {config['id']} (Frequency: {frequency}m)")
 
         # ================================
         # X TWEETS COLLECTION (DISABLED)
@@ -115,8 +124,8 @@ def run_fetch_job():
         # YOUTUBE COLLECTION
         # ================================
 
-        # Calculate time window (last 15 minutes)
-        published_after = (datetime.now(timezone.utc) - timedelta(minutes=FETCH_INTERVAL_MINUTES)).isoformat().replace("+00:00", "Z")
+        # Calculate time window based on config frequency
+        published_after = (datetime.now(timezone.utc) - timedelta(minutes=frequency)).isoformat().replace("+00:00", "Z")
 
         youtube_videos = fetch_youtube_posts(config, published_after=published_after)
 
@@ -202,7 +211,8 @@ def run_fetch_job():
 
             log.info(f"Emails configured: {emails}")
 
-            frequency = config.get("frequency", 60)
+            # Use the config's own frequency for the report lookback
+            report_lookback = frequency
 
             if EMAIL_MODE == "separate":
 
@@ -210,7 +220,7 @@ def run_fetch_job():
 
                 for platform in platforms:
 
-                    posts = get_recent_posts(cur, config["id"], platform, frequency)
+                    posts = get_recent_posts(cur, config["id"], platform, report_lookback)
 
                     log.info(f"{platform}: Found {len(posts)} posts for email report")
 
@@ -233,7 +243,7 @@ def run_fetch_job():
                 posts = get_recent_posts_all_platforms(
                     cur,
                     config["id"],
-                    frequency
+                    report_lookback
                 )
 
                 log.info(f"Combined report: Found {len(posts)} posts")
@@ -250,6 +260,13 @@ def run_fetch_job():
                         "Social Media Monitoring Report",
                         html
                     )
+
+        # Update last_run_at
+        cur.execute(
+            "UPDATE keyword_configs SET last_run_at = %s WHERE id = %s",
+            (now, config["id"])
+        )
+        db.commit()
     cur.close()
     db.close()
 
