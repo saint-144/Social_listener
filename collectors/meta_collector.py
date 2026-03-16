@@ -112,7 +112,7 @@ def fetch_instagram_posts(config, published_after=None):
             "user_id": INSTAGRAM_BUSINESS_ACCOUNT_ID,
             "fields": "id,caption,timestamp,permalink",
             "access_token": META_ACCESS_TOKEN,
-            "limit": 25
+            "limit": 10  # keep low to avoid API "reduce data" errors
         }
 
         try:
@@ -126,17 +126,36 @@ def fetch_instagram_posts(config, published_after=None):
 
             for item in data.get("data", []):
                 caption = item.get("caption", "")
-                created_at = item.get("timestamp")
+                created_at_str = item.get("timestamp")
 
-                if published_after and created_at < published_after:
-                    continue
+                # Compare datetimes instead of strings
+                if published_after and created_at_str:
+                    try:
+                        from datetime import datetime
+                        item_dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                        pub_after_dt = datetime.fromisoformat(published_after.replace('Z', '+00:00')).replace(tzinfo=None)
+                        if item_dt < pub_after_dt:
+                            continue
+                    except Exception as e:
+                        print(f"DEBUG: Date parse error: {e}")
+
+                # Parse published_at to a naive datetime object
+                parsed_pub_dt = None
+                if created_at_str:
+                    try:
+                        from datetime import datetime
+                        parsed_pub_dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    except Exception as e:
+                        print(f"DEBUG: Failed to parse published_at: {e} | Raw: {created_at_str}")
+                else:
+                    print(f"DEBUG: created_at_str is empty for post {item['id']}")
 
                 post = {
                     "id": item["id"],
                     "text": caption,
-                    "author": "Instagram User", # IG Hashtag API doesn't return author by default
+                    "author": "Instagram User",
                     "url": item.get("permalink"),
-                    "published_at": created_at,
+                    "published_at": parsed_pub_dt,
                     "platform": "INSTAGRAM"
                 }
                 all_posts.append(post)
