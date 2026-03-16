@@ -23,6 +23,9 @@ MAX_RESULTS_PER_QUERY = int(os.getenv("MAX_RESULTS_PER_QUERY", 100))
 
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
+FB_PAGE_IDS = os.getenv("FB_PAGE_IDS", "").split(",") if os.getenv("FB_PAGE_IDS") else []
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
 
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))

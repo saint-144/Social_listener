@@ -9,6 +9,7 @@ from parsers.sentiment import analyze_sentiment
 from parsers.demographics import estimate_demographics
 
 from collectors.youtube_collector import fetch_youtube_posts
+from collectors.meta_collector import fetch_instagram_posts
 
 from notifications.email_sender import send_email
 from notifications.report_builder import build_email_table
@@ -201,6 +202,54 @@ def run_fetch_job():
                 db.rollback()
                 log.warning(e)
 
+        # ================================
+        # INSTAGRAM COLLECTION
+        # ================================
+        ig_posts = fetch_instagram_posts(config, published_after=published_after)
+        log.info(f"Instagram returned {len(ig_posts)} posts")
+
+        for post in ig_posts:
+            text = post.get("text", "").strip()
+            if not text: continue
+            
+            matched = find_matching_keywords(text, keywords)
+            
+            try:
+                cur.execute("""
+                    INSERT IGNORE INTO posts
+                    (platform_post_id, platform, keyword_config_id, matched_keywords,
+                    post_text, post_url, author_username, author_display_name,
+                    like_count, retweet_count, reply_count, impression_count,
+                    language, posted_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    post["id"], "INSTAGRAM", config["id"], json.dumps(matched),
+                    text, post["url"], post["author"], post["author"],
+                    0, 0, 0, 0, "en", post["published_at"]
+                ))
+                
+                post_id = cur.lastrowid
+                if post_id:
+                    sentiment, score = analyze_sentiment(text)
+                    cur.execute("""
+                        INSERT IGNORE INTO post_sentiment
+                        (post_id, sentiment, sentiment_score)
+                        VALUES (%s,%s,%s)
+                    """, (post_id, sentiment, score))
+
+                    demo = estimate_demographics(post["author"], post["author"], "")
+                    cur.execute("""
+                        INSERT IGNORE INTO author_demographics
+                        (post_id, estimated_age_group, estimated_gender)
+                        VALUES (%s,%s,%s)
+                    """, (post_id, demo["estimated_age_group"], demo["estimated_gender"]))
+                    
+                    db.commit()
+                    total += 1
+            except Exception as e:
+                db.rollback()
+                log.warning(f"Failed to save IG post {post['id']}: {e}")
+
         emails = config.get("emails")
 
         log.info(f"Checking email trigger for config {config['id']}")
@@ -216,7 +265,7 @@ def run_fetch_job():
 
             if EMAIL_MODE == "separate":
 
-                platforms = ["X", "YOUTUBE"]
+                platforms = ["INSTAGRAM", "YOUTUBE", "X"]
 
                 for platform in platforms:
 
